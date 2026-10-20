@@ -5,12 +5,11 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <Eigen/Geometry>
 #include <pcl_conversions/pcl_conversions.h>
-#include <tf2_eigen/tf2_eigen.hpp> // ROS 2 header
+#include <tf2_eigen/tf2_eigen.hpp>
 #include <execution>
 #include <random>
 #include "free_space_detection/tools/filter_2d.h"
 #include "free_space_detection/tools/filter_3d.h"
-#include "free_space_detection/tools/feature_detect_2d.h"
 #include "free_space_detection/tools/feature_detect_3d.h"
 #include "free_space_detection/tools/OrthographicProjector.hpp"
 
@@ -21,17 +20,17 @@ void FreeSpaceDetect::initSubscriptions()
     this->declare_parameter(param_name, "/perception/semantic_cloud");
     const std::string semantic_cloud_topic = this->get_parameter(param_name).as_string();
     mGoalSub = create_subscription<geometry_msgs::msg::PoseStamped>("/goal_pose", rclcpp::ServicesQoS(),
-                                                                    [this](
-                                                                const geometry_msgs::msg::PoseStamped::ConstSharedPtr& goal_msg) -> void
-                                                                        {
-                                                                            RCLCPP_INFO(get_logger(), "Received a goal...");
-                                                                            this->mGoalMsg = *goal_msg; {
-                                                                                std::lock_guard lock(mBufferMutex);
-                                                                                this->mHasGoal = true;
-                                                                            }
-                                                                            reset();
-                                                                            this->mTriggerEvent.notify_one();
-                                                                        });
+                [this](const geometry_msgs::msg::PoseStamped::ConstSharedPtr& goal_msg) -> void
+                    {
+                        RCLCPP_INFO(get_logger(), "Received a goal...");
+                        this->mGoalMsg = *goal_msg;
+                        {
+                            std::lock_guard lock(mBufferMutex);
+                            this->mHasGoal = true;
+                        }
+                        reset();
+                        this->mTriggerEvent.notify_one();
+                    });
 
     mCloudSub = create_subscription<sensor_msgs::msg::PointCloud2>("/cloud_map", rclcpp::SensorDataQoS(),
                                                                    [this](sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
@@ -49,8 +48,7 @@ void FreeSpaceDetect::initSubscriptions()
 void FreeSpaceDetect::initPublishers()
 {
     const std::string params_prefix = "TopicName.Perception.Target";
-    this->declare_parameters<std::string>(params_prefix, {
-                                              {"Pose", "/perception/target/pose"}, {"BBox", "/perception/visualization/cubes"}});
+    this->declare_parameters<std::string>(params_prefix, {{"Pose", "/perception/target/pose"}, {"BBox", "/perception/visualization/cubes"}});
     std::map<std::string, std::string> target_topics;
     if (!this->get_parameters<std::string>(params_prefix, target_topics))
     {
@@ -75,7 +73,6 @@ void FreeSpaceDetect::workerLoop()
     while (rclcpp::ok())
     {
         sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud_msg;
-        //
         {
             std::unique_lock lock(mBufferMutex);
             mTriggerEvent.wait(lock, [this]() -> bool
@@ -129,7 +126,8 @@ void FreeSpaceDetect::workerLoop()
         trailer_roi_marker.pose.position.z = 0.5f * (trailer_roi.min_z + trailer_roi.max_z);
         visualization_msg.markers.push_back(trailer_roi_marker);
 
-        Eigen::Isometry3f goal_pose; {
+        Eigen::Isometry3f goal_pose;
+        {
             Eigen::Isometry3d temp{};
             tf2::fromMsg(mGoalMsg.pose, temp);
             goal_pose = temp.cast<float>();
@@ -200,34 +198,37 @@ void FreeSpaceDetect::workerLoop()
         Eigen::Vector3f ramp_position;
         float ramp_tilt;
         Eigen::Vector2f ramp_size;
-        if (!estimateRampPose(rough_ramp_cloud, ramp_position, ramp_tilt, ramp_size))
+        if (estimateRampPose(rough_ramp_cloud, ramp_position, ramp_tilt, ramp_size))
+        {
+
+            // std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            // continue;
+            visualization_msgs::msg::Marker ramp_marker;
+            ramp_marker.header.frame_id = FRAME_ID;
+            ramp_marker.header.stamp = this->now();
+            ramp_marker.ns = ns;
+            ramp_marker.id = 3;
+            ramp_marker.type = visualization_msgs::msg::Marker::CUBE;
+            ramp_marker.action = visualization_msgs::msg::Marker::ADD;
+            ramp_marker.scale.x = ramp_size.x();
+            ramp_marker.scale.y = ramp_size.y();
+            ramp_marker.scale.z = 0.04;
+            ramp_marker.color.r = 0.1f;
+            ramp_marker.color.g = 0.75f;
+            ramp_marker.color.b = 1.0f;
+            ramp_marker.color.a = 0.8f;
+            ramp_marker.pose.position.x = ramp_position.x();
+            ramp_marker.pose.position.y = ramp_position.y();
+            ramp_marker.pose.position.z = ramp_position.z();
+            tf2::Quaternion ramp_orientation;
+            ramp_orientation.setRPY(0.0, -static_cast<double>(ramp_tilt), 0.0);
+            ramp_marker.pose.orientation = tf2::toMsg(ramp_orientation);
+            visualization_msg.markers.push_back(ramp_marker);
+        }
+        else
         {
             RCLCPP_ERROR(get_logger(), "Failed to estimate pose of the ramp!");
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            continue;
         }
-
-        visualization_msgs::msg::Marker ramp_marker;
-        ramp_marker.header.frame_id = FRAME_ID;
-        ramp_marker.header.stamp = this->now();
-        ramp_marker.ns = ns;
-        ramp_marker.id = 3;
-        ramp_marker.type = visualization_msgs::msg::Marker::CUBE;
-        ramp_marker.action = visualization_msgs::msg::Marker::ADD;
-        ramp_marker.scale.x = ramp_size.x();
-        ramp_marker.scale.y = ramp_size.y();
-        ramp_marker.scale.z = 0.04;
-        ramp_marker.color.r = 0.1f;
-        ramp_marker.color.g = 0.75f;
-        ramp_marker.color.b = 1.0f;
-        ramp_marker.color.a = 0.8f;
-        ramp_marker.pose.position.x = ramp_position.x();
-        ramp_marker.pose.position.y = ramp_position.y();
-        ramp_marker.pose.position.z = ramp_position.z();
-        tf2::Quaternion ramp_orientation;
-        ramp_orientation.setRPY(0.0, -static_cast<double>(ramp_tilt), 0.0);
-        ramp_marker.pose.orientation = tf2::toMsg(ramp_orientation);
-        visualization_msg.markers.push_back(ramp_marker);
 
         if (mPlacementZones.empty())
         {
@@ -331,17 +332,17 @@ bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::
         return false;
     }
 
-    const auto cloud_without_floor = std::make_shared<RawCloud>();
-    cloud_without_floor->reserve(cloud->size());
+    const auto cloud_without_floor_and_ceil = std::make_shared<RawCloud>();
+    cloud_without_floor_and_ceil->reserve(cloud->size());
     for (const auto& point : cloud->points)
     {
-        if (point.z > 0.2)
+        if (point.z > 0.2f && point.z < 1.7f)
         {
-            cloud_without_floor->emplace_back(point.x, point.y, point.z);
+            cloud_without_floor_and_ceil->emplace_back(point.x, point.y, point.z);
         }
     }
 
-    if (cloud_without_floor->size() < 100)
+    if (cloud_without_floor_and_ceil->size() < 100)
     {
         RCLCPP_WARN(get_logger(), "cloud_without_floor has too few points!");
         return false;
@@ -353,7 +354,7 @@ bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::
     constexpr float min_side_separation = 1.0f / resolution;
     constexpr float max_side_separation = 5.0f / resolution;
     OrthographicProjector<pcl::PointXYZ> projector(View::TOP, resolution);
-    projector.setCloud(cloud_without_floor);
+    projector.setCloud(cloud_without_floor_and_ceil);
 
     cv::Mat top_down_img = projector.projection();
     cv::Mat debug_img;
@@ -483,8 +484,8 @@ bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::
             }
 
             const double boundary_support = static_cast<double>(first_support + second_support) / (2 * sampled_bins);
-            const double score = (std::min(first_length, second_length) + 0.5 * overlap) * boundary_support;
-            if (score > best_score)
+            if (const double score = (std::min(first_length, second_length) + 0.5 * overlap) * boundary_support;
+                score > best_score)
             {
                 best_score = score;
                 best_first = candidate_indices[i];
@@ -535,9 +536,6 @@ bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::
     {
         std::swap(second_start, second_end);
     }
-
-    // const cv::Point2f rear_start = first_end;
-    // const cv::Point2f rear_end = second_end;
 
     cv::line(debug_img, first_start, second_start, cv::Scalar(255, 0, 0), 2, cv::LINE_AA);
 
@@ -602,8 +600,6 @@ bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::
     }
     const float angle = std::atan2(-mid_plane[0], mid_plane[1]);
 
-    // pcl::PointCloud<pcl::PointXYZ> side_walls = refined_side_wall_1 + refined_side_wall_2;
-
     // 1. Rotation transformation from truck frame to rotated frame
     Eigen::Isometry3f T_rot = Eigen::Isometry3f::Identity();
     T_rot.rotate(Eigen::AngleAxisf(-angle, Eigen::Vector3f::UnitZ()));
@@ -618,18 +614,7 @@ bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::
     const float wall_2_y = -side_wall_2_plane[3] / normal_2.y();
 
     const bool wall_1_is_left = wall_1_y < wall_2_y;
-    // RawCloud* left_wall_cloud{nullptr};
-    // RawCloud* right_wall_cloud{nullptr};
-    // if (wall_1_is_left)
-    // {
-    //     left_wall_cloud = &refined_side_wall_1;
-    //     right_wall_cloud = &refined_side_wall_2;
-    // }
-    // else
-    // {
-    //     left_wall_cloud = &refined_side_wall_2;
-    //     right_wall_cloud = &refined_side_wall_1;
-    // }
+
     pcl::PointXYZ wall_1_min, wall_1_max, wall_2_min, wall_2_max;
     pcl::getMinMax3D(refined_side_wall_1, wall_1_min, wall_1_max);
     pcl::getMinMax3D(refined_side_wall_2, wall_2_min, wall_2_max);
@@ -671,8 +656,8 @@ bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::
 
     const auto back_wall = std::make_shared<RawCloud>();
     filter3d::getCloud(*trailer_cloud, back_wall, nullptr, {.min_x = trailer_min.x, .max_x = trailer_min.x + 0.2f,
-                           .min_y = trailer_bbox.min_y + 0.1f, .max_y = trailer_bbox.max_y - 0.1f,
-                           .min_z = 0.5f * (trailer_bbox.min_z + trailer_bbox.max_z), .max_z = trailer_bbox.max_z - 0.1f});
+                       .min_y = trailer_bbox.min_y + 0.1f, .max_y = trailer_bbox.max_y - 0.1f,
+                       .min_z = 0.5f * (trailer_bbox.min_z + trailer_bbox.max_z), .max_z = trailer_bbox.max_z - 0.1f});
     pcl::PointXYZ back_wall_min, back_wall_max;
     pcl::getMinMax3D(*back_wall, back_wall_min, back_wall_max);
     trailer_bbox.min_x = back_wall_max.x;
