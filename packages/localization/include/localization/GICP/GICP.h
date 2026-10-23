@@ -48,7 +48,6 @@ public:
 
     ~GICP() = default;
 
-
     [[nodiscard]] const Config& config() const noexcept
     {
         return mConfig;
