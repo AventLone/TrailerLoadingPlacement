@@ -317,8 +317,7 @@ void FreeSpaceDetect::workerLoop()
     }
 }
 
-bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::Ptr& trailer_cloud, Eigen::Vector3f& trailer_pose,
-                                    ROI& trailer_bbox) const
+bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::Ptr& trailer_cloud, Eigen::Vector3f& trailer_pose, ROI& trailer_bbox) const
 {
     if (cloud->size() < 100)
     {
@@ -666,8 +665,7 @@ bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::
     return true;
 }
 
-bool FreeSpaceDetect::estimateRampPose(const RawCloud::Ptr& cloud, Eigen::Vector3f& ramp_position, float& ramp_tilt,
-                                       Eigen::Vector2f& ramp_size) const
+bool FreeSpaceDetect::estimateRampPose(const RawCloud::Ptr& cloud, Eigen::Vector3f& ramp_position, float& ramp_tilt, Eigen::Vector2f& ramp_size) const
 {
     if (cloud->size() < 100)
     {
@@ -748,8 +746,7 @@ bool FreeSpaceDetect::estimateRampPose(const RawCloud::Ptr& cloud, Eigen::Vector
     return true;
 }
 
-bool FreeSpaceDetect::planPlacementZone(const Eigen::Vector3f& trailer_pose, const Eigen::Vector2f& trailer_size,
-                                        const Eigen::Vector2f& load_size)
+bool FreeSpaceDetect::planPlacementZone(const Eigen::Vector3f& trailer_pose, const Eigen::Vector2f& trailer_size, const Eigen::Vector2f& load_size)
 {
     mPlacementZones.clear();
     if (!trailer_pose.allFinite() || !trailer_size.allFinite() || !load_size.allFinite() || (trailer_size.array() <= 0.0f).any() || (
@@ -801,8 +798,7 @@ bool FreeSpaceDetect::planPlacementZone(const Eigen::Vector3f& trailer_pose, con
     return true;
 }
 
-bool FreeSpaceDetect::locateAvailableArea(const RawCloud::Ptr& trailer_cloud, const Eigen::Vector3f& load_size,
-                                          Eigen::Vector3f& slot_position) const
+bool FreeSpaceDetect::locateAvailableArea(const RawCloud::Ptr& trailer_cloud, const Eigen::Vector3f& load_size, Eigen::Vector3f& slot_position) const
 {
     if (!trailer_cloud || trailer_cloud->size() < 100 || !load_size.allFinite() || (load_size.array() <= 0.0f).any())
     {
@@ -854,8 +850,9 @@ bool FreeSpaceDetect::locateAvailableArea(const RawCloud::Ptr& trailer_cloud, co
 
     std::ranges::sort(feasible_points, std::less{}, &cv::Point::x);
     const auto slot_position_img = std::ranges::max_element(feasible_points.begin(),
-                                                            feasible_points.begin() + std::min<long>(
-                                                                60, static_cast<long>(feasible_points.size())), {}, &cv::Point::y);
+                                                            feasible_points.begin() +
+                                                            std::min<long>(60, static_cast<long>(feasible_points.size())),
+                                                            {}, &cv::Point::y);
     const auto slot_coordinate_nominal = projector.getCoordinate(*slot_position_img);
     const auto nearest_zone = std::ranges::min_element(mPlacementZones, {}, [slot_coordinate_nominal](const Eigen::Vector2f& zone)
                                                            {
@@ -863,13 +860,14 @@ bool FreeSpaceDetect::locateAvailableArea(const RawCloud::Ptr& trailer_cloud, co
                                                            });
     slot_position = Eigen::Vector3f(nearest_zone->x(), nearest_zone->y(), floor_z + 0.01f);
 
-    const cv::Rect slot_rect(slot_position_img->x - footprint_width / 2, slot_position_img->y - footprint_height / 2, footprint_width,
-                             footprint_height);
+    const cv::Rect slot_rect(slot_position_img->x - footprint_width / 2, slot_position_img->y - footprint_height / 2,
+                             footprint_width, footprint_height);
     cv::rectangle(debug_img, slot_rect, cv::Scalar(0, 255, 0), 2, cv::LINE_AA);
     cv::circle(debug_img, *slot_position_img, 2, cv::Scalar(0, 0, 255), cv::FILLED, cv::LINE_AA);
     publishDebugImg(debug_img);
 
-    if (validateSlot(cloud_without_floor, slot_position, load_size))
+    constexpr uint32_t points_tolerance = 20;
+    if (filter3d::checkSpace(*cloud_without_floor, slot_position, load_size) < points_tolerance)
     {
         return true;
     }
@@ -883,7 +881,6 @@ bool FreeSpaceDetect::locateAvailableArea(const RawCloud::Ptr& trailer_cloud, co
 
     constexpr std::size_t min_plane_points = 10;
     constexpr float plane_distance_threshold = 0.03f;
-    constexpr float slot_clearance = 0.02f;
     constexpr double angle_tolerance = 5.0 * CV_PI / 180.0;
     if (slot_cloud->size() < 2 * min_plane_points)
     {
@@ -940,6 +937,7 @@ bool FreeSpaceDetect::locateAvailableArea(const RawCloud::Ptr& trailer_cloud, co
     Eigen::Vector2f fitted_center = slot_position.head<2>();
     for (int plane_index = 0; plane_index < 2; ++plane_index)
     {
+        constexpr float slot_clearance = 0.03f;
         const int tangent_axis = plane_index;
         pcl::PointXYZ min_point, max_point;
         pcl::getMinMax3D(*plane_clouds[plane_index], min_point, max_point);
@@ -986,9 +984,10 @@ bool FreeSpaceDetect::locateAvailableArea(const RawCloud::Ptr& trailer_cloud, co
         return false;
     }
     const Eigen::Vector3f fitted_position(fitted_center.x(), fitted_center.y(), slot_position.z());
-    if (!validateSlot(cloud_without_floor, fitted_position, load_size))
+    if (const auto points_in_space = filter3d::checkSpace(*cloud_without_floor, fitted_position, load_size);
+        points_in_space > points_tolerance)
     {
-        RCLCPP_WARN(get_logger(), "The adjusted slot still intersects an obstacle!");
+        RCLCPP_WARN(get_logger(), "points_in_space: %d. The adjusted slot still intersects an obstacle!", points_in_space);
         // return false;
     }
     slot_position = fitted_position;

@@ -140,13 +140,11 @@ void removeGround(const pcl::PointCloud<PointT>& cloud_in, pcl::PointCloud<Point
 
 /* Check for free space */
 template<class PointT>
-bool checkSpace(const pcl::PointCloud<PointT>& cloud, const Eigen::Isometry3f& pose, const ROI& roi)
+uint32_t checkSpace(const pcl::PointCloud<PointT>& cloud, const ROI& roi)
 {
-    pcl::PointCloud<PointT> cloud_rebased;
-    pcl::transformPointCloud(cloud, cloud_rebased, pose.inverse());
-
     uint32_t points_count{};
-    for (const auto& point : cloud_rebased)
+
+    for (const auto& point : cloud)
     {
         if (roi.enclose(point))
         {
@@ -154,12 +152,36 @@ bool checkSpace(const pcl::PointCloud<PointT>& cloud, const Eigen::Isometry3f& p
         }
     }
 
-    if (points_count > 9)
-    {
-        return false;
-    }
+    return points_count;
+}
 
-    return true;
+template<class PointT>
+uint32_t checkSpace(const pcl::PointCloud<PointT>& cloud, const Eigen::Isometry3f& pose, const ROI& bbox)
+{
+    pcl::PointCloud<PointT> cloud_rebased;
+    pcl::transformPointCloud(cloud, cloud_rebased, pose.inverse());
+
+    return checkSpace(cloud_rebased, bbox);
+}
+
+template<class PointT>
+uint32_t checkSpace(const pcl::PointCloud<PointT>& cloud, const Eigen::Vector3f& position, const ROI& bbox)
+{
+    const ROI roi = {position.x() + bbox.min_x, position.x() + bbox.max_x,
+                     position.y() + bbox.min_y, position.y() + bbox.min_y,
+                     position.z() + bbox.min_z, position.z() + bbox.max_z};
+
+    return checkSpace(cloud, roi);
+}
+
+template<class PointT>
+uint32_t checkSpace(const pcl::PointCloud<PointT>& cloud, const Eigen::Vector3f& position, const Eigen::Vector3f& dimensions)
+{
+    const ROI roi = {position.x() - 0.5f * dimensions.x(), position.x() + 0.5f * dimensions.x(),
+                     position.y() - 0.5f * dimensions.y(), position.y() + 0.5f * dimensions.y(),
+                     position.z(), position.z() + dimensions.z()};
+
+    return checkSpace(cloud, roi);
 }
 
 template<class PointT>
@@ -237,7 +259,6 @@ bool normalFilter(const typename pcl::PointCloud<PointT>::Ptr& src_cloud,
             }
         }
     }
-
 
     return true;
 }
