@@ -14,9 +14,11 @@ endif ()
 # --------------------------------------------------------------------------------
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies() # Automaticly find all the dependent packages mentioned in 'package.xml'
+find_package(TBB REQUIRED)
 
 file(GLOB_RECURSE SOURCE_FILES ${CMAKE_CURRENT_SOURCE_DIR}/source/*.cpp)
 ament_auto_add_executable(free_space_detection ${SOURCE_FILES})
+target_link_libraries(free_space_detection TBB::tbb)
 target_include_directories(free_space_detection PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include/${PROJECT_NAME}>

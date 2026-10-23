@@ -60,7 +60,7 @@ Visualization Manager:
       Description Source: Topic
       Description Topic:
         Depth: 5
-        Durability Policy: Volatile
+        Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /robot_description
@@ -288,9 +288,9 @@ Visualization Manager:
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -19.332956314086914
-        Y: -0.9745858907699585
-        Z: -6.164850674394984e-06
+        X: 0
+        Y: 0
+        Z: 0.5
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false

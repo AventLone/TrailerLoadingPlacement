@@ -25,4 +25,7 @@ endif()
 # --------------------------------------------------------------------------------
 # Install
 # --------------------------------------------------------------------------------
-ament_auto_package(INSTALL_TO_SHARE config launch meshes urdf)
+install(DIRECTORY meshes meshs urdf
+    DESTINATION share/${PROJECT_NAME}
+    OPTIONAL)
+ament_auto_package(INSTALL_TO_SHARE config launch)

@@ -1,0 +1,18 @@
+# LiDAR pose in the parent frame, applied to the URDF at launch time.
+# Current URDF: LOLA -> body is identity, so body and LOLA share coordinates.
+# Translation is in metres. Rotation is in radians: R = Rz(yaw) Ry(pitch) Rx(roll).
+# p_body = R * p_JT128 + translation; this is NOT the inverse transform.
+# Handheld test: colocated origins, pitch +90 degrees about the parent Y axis.
+# Restart the full stack after editing; localization caches this transform at startup.
+lidar_extrinsics:
+  joint_name: body_top_lidar
+  parent_frame: body
+  child_frame: JT128
+  translation:
+    x: 0.0
+    y: 0.0
+    z: 0.25
+  rotation_rpy:
+    roll: 0.0
+    pitch: 1.5707963267948966
+    yaw: 3.1415926
