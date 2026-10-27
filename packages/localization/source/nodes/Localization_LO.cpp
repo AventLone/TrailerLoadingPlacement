@@ -2,9 +2,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include "localization/tools/OrthographicProjector.hpp"
 #include "localization/tools/feature_detect_3d.hpp"
-#include "localization/tools/filter_3d.h"
 #include <opencv2/opencv.hpp>
-#include "localization/types/common.hpp"
 
 namespace
 {

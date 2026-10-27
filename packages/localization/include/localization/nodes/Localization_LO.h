@@ -14,6 +14,7 @@
 #include <tf2_ros/transform_broadcaster.hpp>
 #include "localization/GICP/GICP.h"
 #include "localization/types/common.hpp"
+#include "localization/types/QoS.hpp"
 
 class Localization_LO : public rclcpp::Node
 {
@@ -124,10 +125,10 @@ private:
 
     void initPublisher()
     {
-        mProcessedScanVisPub = create_publisher<sensor_msgs::msg::PointCloud2>("/scan_vis", rclcpp::SensorDataQoS());
-        mVoxelMapPub = create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_map", rclcpp::SensorDataQoS());
-        mBasePosePub = create_publisher<geometry_msgs::msg::PoseStamped>("/base_pose", rclcpp::SensorDataQoS());
-        mBasePosePathPub = create_publisher<nav_msgs::msg::Path>("/base_pose_path", rclcpp::SensorDataQoS());
+        mProcessedScanVisPub = create_publisher<sensor_msgs::msg::PointCloud2>("/scan_vis", RELIABLE_LATEST);
+        mVoxelMapPub = create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_map", RELIABLE_LATEST);
+        mBasePosePub = create_publisher<geometry_msgs::msg::PoseStamped>("/base_pose", SENSOR_LATEST);
+        mBasePosePathPub = create_publisher<nav_msgs::msg::Path>("/base_pose_path", SENSOR_LATEST);
     }
 
     /* Transform LiDAR scan to base truck frame */

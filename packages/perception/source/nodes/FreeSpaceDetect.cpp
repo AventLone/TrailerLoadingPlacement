@@ -6,7 +6,7 @@
 #include "free_space_detection/tools/filter_3d.h"
 #include "free_space_detection/tools/feature_detect_3d.h"
 #include "free_space_detection/tools/OrthographicProjector.hpp"
-
+#include "free_space_detection/types/QoS.hpp"
 
 void FreeSpaceDetect::initSubscriptions()
 {
@@ -28,21 +28,22 @@ void FreeSpaceDetect::initSubscriptions()
 
     mCloudSub = create_subscription<sensor_msgs::msg::PointCloud2>("/cloud_map", rclcpp::SensorDataQoS(),
                                                                    [this](sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
-                                                                       {
-                                                                           std::lock_guard lock(mBufferMutex);
-                                                                           while (!mCloudBuffer.empty())
-                                                                           {
-                                                                               mCloudBuffer.pop();
-                                                                           }
-                                                                           mCloudBuffer.push(std::move(msg));
-                                                                           this->mTriggerEvent.notify_one();
-                                                                       });
+                                                                         {
+                                                                             std::lock_guard lock(mBufferMutex);
+                                                                             while (!mCloudBuffer.empty())
+                                                                             {
+                                                                                mCloudBuffer.pop();
+                                                                             }
+                                                                             mCloudBuffer.push(std::move(msg));
+                                                                             this->mTriggerEvent.notify_one();
+                                                                         });
 }
 
 void FreeSpaceDetect::initPublishers()
 {
     const std::string params_prefix = "TopicName.Perception.Target";
-    this->declare_parameters<std::string>(params_prefix, {{"Pose", "/perception/target/pose"}, {"BBox", "/perception/visualization/cubes"}});
+    this->declare_parameters<std::string>(params_prefix, {{"Pose", "/perception/target/pose"},
+                                                         {"BBox", "/perception/visualization/cubes"}});
     std::map<std::string, std::string> target_topics;
     if (!this->get_parameters<std::string>(params_prefix, target_topics))
     {
@@ -51,28 +52,27 @@ void FreeSpaceDetect::initPublishers()
     mVisualizationPub = create_publisher<visualization_msgs::msg::MarkerArray>(target_topics["BBox"], rclcpp::SensorDataQoS());
     mSlotPosePub = create_publisher<geometry_msgs::msg::PoseStamped>("slot_pose", rclcpp::ServicesQoS());
     mDebugImgPub = create_publisher<sensor_msgs::msg::Image>("debug_img", rclcpp::SensorDataQoS());
+    mResultPub = create_publisher<free_space_detection::msg::PerceptionResult>("detect_result", free_space_detection::qos::RELIABLE_LATEST);
 }
 
 void FreeSpaceDetect::workerLoop()
 {
     constexpr std::string_view ns = "visualization";
     constexpr std::string_view FRAME_ID = "map";
-    constexpr float load_size_x = 1.2f;
-    constexpr float load_size_y = 1.0f;
-    constexpr float load_size_z = 1.5f;
     const auto LOAD_SIZE(Eigen::Vector3f(1.2f, 1.0f, 1.5f));
 
-    // rclcpp::Rate publish_rate(5.0, this->get_clock());
-    rclcpp::WallRate publish_rate(5.0);
+    free_space_detection::msg::PerceptionResult perception_result;
+
+    rclcpp::WallRate publish_rate(5.0);   // rclcpp::Rate publish_rate(5.0, this->get_clock());
     while (rclcpp::ok())
     {
         sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud_msg;
         {
             std::unique_lock lock(mBufferMutex);
             mTriggerEvent.wait(lock, [this]() -> bool
-                                   {
-                                       return (mHasGoal && !mCloudBuffer.empty()) || mIsShutdown;
-                                   });
+                                     {
+                                         return (mHasGoal && !mCloudBuffer.empty()) || mIsShutdown;
+                                     });
             if (mIsShutdown)
             {
                 break;
@@ -80,6 +80,9 @@ void FreeSpaceDetect::workerLoop()
             cloud_msg = std::move(mCloudBuffer.front());
             mCloudBuffer.pop();
         }
+
+        perception_result.success = false;
+        perception_result.header.stamp = cloud_msg->header.stamp;
 
         visualization_msgs::msg::MarkerArray visualization_msg;
 
@@ -134,6 +137,7 @@ void FreeSpaceDetect::workerLoop()
         if (rough_trailer_cloud->size() < 10)
         {
             RCLCPP_ERROR(get_logger(), "slot_space_cloud has too few points!");
+            mResultPub->publish(perception_result);
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
         }
@@ -144,12 +148,10 @@ void FreeSpaceDetect::workerLoop()
         if (!locateTrailer(rough_trailer_cloud, refined_trailer_cloud, trailer_pose, trailer_bbox))
         {
             RCLCPP_ERROR(get_logger(), "Failed to locate the trailer or the ramp!");
+            mResultPub->publish(perception_result);
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
-
-        // RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000, "trailer_bbox: min_x %f, max_x %f; min_y %f, max_y %f; min_z %f, max_z %f.",
-        //     trailer_bbox.min_x, trailer_bbox.max_x, trailer_bbox.min_y, trailer_bbox.max_y, trailer_bbox.min_z, trailer_bbox.max_z);
 
         const auto trailer_dimensions = Eigen::Vector3f(trailer_bbox.max_x - trailer_bbox.min_x,
                                                         trailer_bbox.max_y - trailer_bbox.min_y,
@@ -227,10 +229,11 @@ void FreeSpaceDetect::workerLoop()
         if (mPlacementZones.empty())
         {
             if (!planPlacementZone(trailer_pose, trailer_dimensions.head<2>() - Eigen::Vector2f(0.01f, 0.01f),
-                                   {load_size_x + 0.01f, load_size_y + 0.01f}))
+                                   {LOAD_SIZE.x() + 0.01f, LOAD_SIZE.y() + 0.01f}))
             {
                 RCLCPP_ERROR(get_logger(), "Failed to plan placement zones!");
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                mResultPub->publish(perception_result);
                 continue;
             }
         }
@@ -245,8 +248,8 @@ void FreeSpaceDetect::workerLoop()
             placement_marker.id = static_cast<int>(index) + 10;
             placement_marker.type = visualization_msgs::msg::Marker::CUBE;
             placement_marker.action = visualization_msgs::msg::Marker::ADD;
-            placement_marker.scale.x = load_size_x;
-            placement_marker.scale.y = load_size_y;
+            placement_marker.scale.x = LOAD_SIZE.x();
+            placement_marker.scale.y = LOAD_SIZE.y();
             placement_marker.scale.z = placement_marker_height;
             std::mt19937 color_generator(index);
             std::uniform_real_distribution color_distribution(0.2f, 1.0f);
@@ -297,20 +300,27 @@ void FreeSpaceDetect::workerLoop()
         {
             const Eigen::Vector2f position_in_map = Eigen::Rotation2Df(trailer_pose.z()) * slot_position.head<2>();
             available_marker.action = visualization_msgs::msg::Marker::ADD;
-            available_marker.scale.x = load_size_x;
-            available_marker.scale.y = load_size_y;
-            available_marker.scale.z = load_size_z;
+            available_marker.scale.x = LOAD_SIZE.x();
+            available_marker.scale.y = LOAD_SIZE.y();
+            available_marker.scale.z = LOAD_SIZE.z();
             available_marker.color.r = 0.0f;
             available_marker.color.g = 1.0f;
             available_marker.color.b = 0.0f;
             available_marker.color.a = 0.6f;
             available_marker.pose.position.x = position_in_map.x();
             available_marker.pose.position.y = position_in_map.y();
-            available_marker.pose.position.z = trailer_bbox.min_z + 0.5f * load_size_z;
+            available_marker.pose.position.z = trailer_bbox.min_z + 0.5f * LOAD_SIZE.z();
             available_marker.pose.orientation = toQuaternionMsg(trailer_pose.z());
+
+            assignValue(perception_result);
+            perception_result.slot_position.x = slot_position.x();
+            perception_result.slot_position.y = slot_position.y();
+            perception_result.slot_position.z = slot_position.z();
+            mResultPub->publish(perception_result);
         }
         visualization_msg.markers.push_back(available_marker);
 
+        mResultPub->publish(perception_result);
         mVisualizationPub->publish(visualization_msg);
 
         publish_rate.sleep();
@@ -597,7 +607,6 @@ bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::
     Eigen::Isometry3f T_rot = Eigen::Isometry3f::Identity();
     T_rot.rotate(Eigen::AngleAxisf(-angle, Eigen::Vector3f::UnitZ()));
 
-    // pcl::transformPointCloud(side_walls, side_walls, T_rot);
     pcl::transformPointCloud(refined_side_wall_1, refined_side_wall_1, T_rot);
     pcl::transformPointCloud(refined_side_wall_2, refined_side_wall_2, T_rot);
 
