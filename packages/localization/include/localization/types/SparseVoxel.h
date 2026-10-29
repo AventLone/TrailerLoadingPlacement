@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstddef>
 #include <deque>
 #include <limits>
@@ -11,6 +12,7 @@
 struct PointWithCovariance
 {
     Eigen::Vector3f position;
+    // Valid covariances use the PCL GICP plane model, not physical measurement variances.
     Eigen::Matrix3f covariance;
     bool covariance_valid{false};
 };
@@ -23,12 +25,11 @@ struct Correspondence
 
 class SparseVoxel
 {
-    static constexpr float VOXEL_SIZE = 0.5;
-    static constexpr float INVERSE_VOXEL_SIZE = 1.0f / VOXEL_SIZE;
-    static constexpr int MIN_COVARIANCE_NEIGHBORS = 10;
-    static constexpr int MAX_COVARIANCE_NEIGHBORS = 36;
-
 public:
+    static constexpr float VOXEL_SIZE = 0.5;
+    static constexpr int MIN_COVARIANCE_NEIGHBORS = 8;
+    static constexpr int MAX_COVARIANCE_NEIGHBORS = 12;
+
     static constexpr float MIN_DIST = 0.1f;
 
 	struct Neighbor
@@ -36,6 +37,7 @@ public:
         const PointWithCovariance* point{nullptr};
 		float squared_distance{std::numeric_limits<float>::infinity()};
 	};
+
 
     SparseVoxel() = default;
 
@@ -70,6 +72,8 @@ public:
 	std::vector<Neighbor> nearestNeighbors(const Eigen::Vector3f& query, int max_neighbors) const;
 
 private:
+    static constexpr float INVERSE_VOXEL_SIZE = 1.0f / VOXEL_SIZE;
+
     struct VoxelKey
     {
         int i{0};
@@ -122,6 +126,13 @@ private:
         Points points;
     };
 
+    struct NeighborCell
+    {
+        const VoxelCell* cell;
+        int offset;
+    };
+
+    using NeighborCells = boost::container::static_vector<NeighborCell, 27>;
     using OccupiedVoxels = boost::unordered_flat_map<VoxelKey, std::size_t>;
 
     static VoxelKey pointToVoxel(const Eigen::Vector3f& point)
@@ -135,5 +146,9 @@ private:
     std::deque<VoxelCell> mCells;
 	std::size_t mPointCount{0};
 
-    void estimateCovariances(const std::vector<PointWithCovariance*>& points) const;
+    static std::array<float, 27> voxelDistanceBounds(const Eigen::Vector3f& query, const VoxelKey& key);
+    NeighborCells neighborCells(const VoxelKey& key) const;
+    static std::vector<Neighbor> nearestNeighbors(const Eigen::Vector3f& query, int max_neighbors,
+                                          const VoxelKey& key, const NeighborCells& cells) ;
+    void estimateCovariances(const std::vector<std::size_t>& cells);
 };

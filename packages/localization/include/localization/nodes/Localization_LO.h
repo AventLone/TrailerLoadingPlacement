@@ -91,7 +91,7 @@ private:
     std::unique_ptr<tf2_ros::TransformBroadcaster> mTfBroadcaster;
 
     /* Trailer voxel map and estimated pose */
-    pcl::PointCloud<pcl::PointXYZ>::Ptr mTrailerVoxelMap;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr mCloudMap;
     Eigen::Isometry3d mBasePose{Eigen::Isometry3d::Identity()};   // Pose of the truck
     nav_msgs::msg::Path mBasePosePath;
     ROI mTrailerRoi{};
@@ -144,7 +144,7 @@ private:
 
     void recordGicpDuration(double duration_ms);
 
-    void updateVoxelMap(const pcl::PointCloud<pcl::PointXYZ>& scan_in_truck);
+    void updateVoxelMap(const pcl::PointCloud<pcl::PointXYZ>& scan_in_base_link);
 
     void workerLoop();
 };

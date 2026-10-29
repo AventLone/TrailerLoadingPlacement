@@ -61,23 +61,23 @@ std::optional<IntensityAnalysis> analyzeIntensity(const pcl::PointCloud<pcl::Poi
 }
 }
 
-void Localization_LO::updateVoxelMap(const pcl::PointCloud<pcl::PointXYZ>& scan_in_truck)
+void Localization_LO::updateVoxelMap(const pcl::PointCloud<pcl::PointXYZ>& scan_in_base_link)
 {
     // Transform scan into trailer local template frame
-    pcl::PointCloud<pcl::PointXYZ> scan_in_trailer;
-    pcl::transformPointCloud(scan_in_truck, scan_in_trailer, mBasePose.cast<float>());
+    pcl::PointCloud<pcl::PointXYZ> scan_in_map;
+    pcl::transformPointCloud(scan_in_base_link, scan_in_map, mBasePose.cast<float>());
 
-    *mTrailerVoxelMap += scan_in_trailer;   // Merge into voxel map
+    *mCloudMap += scan_in_map;   // Merge into voxel map
 
     const auto filtered_map = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     pcl::VoxelGrid<pcl::PointXYZ> voxel_filter;
     voxel_filter.setLeafSize(MAP_RESOLUTION, MAP_RESOLUTION, MAP_RESOLUTION);
-    voxel_filter.setInputCloud(mTrailerVoxelMap);
+    voxel_filter.setInputCloud(mCloudMap);
     voxel_filter.filter(*filtered_map);
 
-    mTrailerVoxelMap = filtered_map;
+    mCloudMap = filtered_map;
 
-    mGicp.insertTargetPoints(scan_in_trailer);
+    mGicp.insertTargetPoints(scan_in_map);
 }
 
 void Localization_LO::recordGicpDuration(const double duration_ms)
@@ -114,9 +114,9 @@ void Localization_LO::recordGicpDuration(const double duration_ms)
 bool Localization_LO::alignICP(const pcl::PointCloud<pcl::PointXYZ>::Ptr& current_scan)
 {
     // RCLCPP_INFO(get_logger(), "Sparsity-aware GICP start.");
-    if (mTrailerVoxelMap == nullptr || mTrailerVoxelMap->empty() || current_scan == nullptr || current_scan->empty())
+    if (mCloudMap == nullptr || mCloudMap->empty() || current_scan == nullptr || current_scan->empty())
     {
-        const std::size_t target_point_count = mTrailerVoxelMap == nullptr ? 0 : mTrailerVoxelMap->size();
+        const std::size_t target_point_count = mCloudMap == nullptr ? 0 : mCloudMap->size();
         const std::size_t source_point_count = current_scan == nullptr ? 0 : current_scan->size();
         RCLCPP_WARN(get_logger(), "GICP skipped: target map has %zu points; source ROI has %zu points.",
                     target_point_count, source_point_count);
@@ -222,8 +222,7 @@ void Localization_LO::workerLoop()
                 if (mIntensityThreshold < 0.0f)
                 {
                     mIntensityThreshold = analysis->suggested_threshold;
-                    RCLCPP_INFO(get_logger(), "Using automatically selected intensity threshold %.2f.",
-                                mIntensityThreshold);
+                    RCLCPP_INFO(get_logger(), "Using automatically selected intensity threshold %.2f.", mIntensityThreshold);
                 }
                 else
                 {
@@ -259,12 +258,12 @@ void Localization_LO::workerLoop()
         voxel_filter.setInputCloud(denoised_scan);
         voxel_filter.filter(*processed_cloud);
 
-        if (mTrailerVoxelMap == nullptr)
+        if (mCloudMap == nullptr)
         {
             if (processed_cloud->size() > 100)
             {
-                mTrailerVoxelMap = processed_cloud;
-                mGicp.insertTargetPoints(*mTrailerVoxelMap);
+                mCloudMap = processed_cloud;
+                mGicp.insertTargetPoints(*mCloudMap);
             }
             else
             {
@@ -294,7 +293,7 @@ void Localization_LO::workerLoop()
         mProcessedScanVisPub->publish(scan_vis_msg);
 
         sensor_msgs::msg::PointCloud2 map_msg;
-        pcl::toROSMsg(*mTrailerVoxelMap, map_msg);
+        pcl::toROSMsg(*mCloudMap, map_msg);
         map_msg.header.stamp = this->now();
         map_msg.header.frame_id = "map";
         mVoxelMapPub->publish(map_msg);

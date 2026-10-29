@@ -13,7 +13,6 @@ endif ()
 # Find ROS2 dependencies
 # --------------------------------------------------------------------------------
 find_package(ament_cmake_auto REQUIRED)
-#ament_auto_find_build_dependencies(REQUIRED geometry_msgs rosidl_default_generators std_msgs)
 ament_auto_find_build_dependencies()
 
 # The executable already uses PROJECT_NAME, so generation needs a distinct target.

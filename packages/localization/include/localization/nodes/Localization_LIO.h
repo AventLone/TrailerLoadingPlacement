@@ -141,8 +141,8 @@ private:
                     mTrigger.notify_one();
                 });
 
-        // mImuSub = create_subscription<sensor_msgs::msg::Imu>("/alphasense/imu", rclcpp::SensorDataQoS().keep_last(2000),
-        mImuSub = create_subscription<sensor_msgs::msg::Imu>("/imu/data", rclcpp::SensorDataQoS().keep_last(2000),
+        // mImuSub = create_subscription<sensor_msgs::msg::Imu>("/alphasense/imu", 100,
+        mImuSub = create_subscription<sensor_msgs::msg::Imu>("/imu/data", 100,
             [this](const sensor_msgs::msg::Imu::ConstSharedPtr& msg)
                 {
                     const lio::ImuData imu{rclcpp::Time(msg->header.stamp).seconds(),

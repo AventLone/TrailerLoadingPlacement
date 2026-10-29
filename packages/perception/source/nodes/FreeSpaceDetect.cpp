@@ -26,7 +26,7 @@ void FreeSpaceDetect::initSubscriptions()
                         this->mTriggerEvent.notify_one();
                     });
 
-    mCloudSub = create_subscription<sensor_msgs::msg::PointCloud2>("/cloud_map", rclcpp::SensorDataQoS(),
+    mCloudSub = create_subscription<sensor_msgs::msg::PointCloud2>("/cloud_map", free_space_detection::qos::RELIABLE_LATEST,
                                                                    [this](sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
                                                                          {
                                                                              std::lock_guard lock(mBufferMutex);
