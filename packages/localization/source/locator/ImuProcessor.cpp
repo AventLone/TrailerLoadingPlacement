@@ -1,4 +1,4 @@
-#include "localization/LIO/ImuProcessor.h"
+#include "localization/locator/ImuProcessor.h"
 
 std::vector<lio::ImuData> lio::ImuProcessor::buildImuSequence(const std::vector<ImuData>& imu_data,
                                                               const double begin, const double end)

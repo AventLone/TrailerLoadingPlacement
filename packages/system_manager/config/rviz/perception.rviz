@@ -1,6 +1,6 @@
 Panels:
   - Class: rviz_common/Displays
-    Help Height: 138
+    Help Height: 111
     Name: Displays
     Property Tree Widget:
       Expanded:
@@ -9,11 +9,13 @@ Panels:
         - /RobotModel1/Description Topic1
         - /PerceptionVisualiza1
         - /Scan1
+        - /Scan1/Topic1
         - /CloudMap1
+        - /CloudMap1/Topic1
         - /DebugImage1
         - /DebugImage1/Topic1
       Splitter Ratio: 0.5
-    Tree Height: 412
+    Tree Height: 439
   - Class: rviz_common/Selection
     Name: Selection
   - Class: rviz_common/Tool Properties
@@ -144,10 +146,7 @@ Visualization Manager:
       Enabled: true
       Name: PerceptionVisualiza
       Namespaces:
-        available_area: true
-        placement_centers: true
-        placement_labels: true
-        visualization: true
+        {}
       Topic:
         Depth: 1
         Durability Policy: Volatile
@@ -183,7 +182,7 @@ Visualization Manager:
         Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
-        Reliability Policy: Best Effort
+        Reliability Policy: Reliable
         Value: /scan_vis
       Use Fixed Frame: true
       Use rainbow: true
@@ -191,8 +190,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 9.005646705627441
-        Min Value: -0.20390428602695465
+        Max Value: 9.004026412963867
+        Min Value: -0.0018456592224538326
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -216,7 +215,7 @@ Visualization Manager:
         Depth: 1
         Durability Policy: Volatile
         History Policy: Keep Last
-        Reliability Policy: Best Effort
+        Reliability Policy: Reliable
         Value: /cloud_map
       Use Fixed Frame: true
       Use rainbow: true
@@ -281,25 +280,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/ThirdPersonFollower
-      Distance: 15.32636833190918
+      Distance: 19.940879821777344
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -19.332956314086914
-        Y: -0.9745858907699585
-        Z: -6.164850674394984e-06
+        X: 1.927710771560669
+        Y: 1.8186078071594238
+        Z: -1.1886896572832484e-05
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.2797961235046387
+      Pitch: 0.6797959804534912
       Target Frame: <Fixed Frame>
       Value: ThirdPersonFollower (rviz_default_plugins)
-      Yaw: 0.3192020654678345
+      Yaw: 0.5992018580436707
     Saved: ~
 Window Geometry:
   DebugImage:

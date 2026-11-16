@@ -11,6 +11,7 @@
 #include <opencv2/imgproc.hpp>
 #include "free_space_detection/types/common.hpp"
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include "free_space_detection/types/history_buffer.hpp"
 
 class FreeSpaceDetect final : public rclcpp::Node
 {
@@ -75,24 +76,10 @@ private:
     tf2_ros::TransformListener mTfListener;
 
     /* Algorithm Logic: History Data */
-    struct
-    {
-        Eigen::Vector3f trailer_pose;
-        Eigen::Vector3f trailer_dimensions;
-        Eigen::Vector3f ramp_position;
-        Eigen::Vector2f ramp_size;
-        float ramp_tilt{};
-
-        void reset()
-        {
-            trailer_pose.setZero();
-            trailer_dimensions.setZero();
-            ramp_position.setZero();
-            ramp_size.setZero();
-            ramp_tilt = 0.0f;
-        }
-    } mHistoryBuffer;
-    std::size_t mHistoryCount{};
+    // HistoryBuffer<200> mHistoryBuffer;
+    bool mExploreTrailer{true}, mTrailerFound{false};
+    ROI mTrailerBBox{};
+    Eigen::Vector3f mTrailerPose;
     std::vector<Eigen::Vector2f> mPlacementZones;
 
     void initSubscriptions();
@@ -138,23 +125,25 @@ private:
     void reset()
     {
         mPlacementZones.clear();
-        mHistoryBuffer.reset();
-        mHistoryCount = 0;
+        // mHistoryBuffer.reset();
+        // mHistoryCount = 0;
     }
 
-    void assignValue(free_space_detection::msg::PerceptionResult& msg)
-    {
-        msg.success = true;
+    // void assignValue(free_space_detection::msg::PerceptionResult& msg) const
+    // {
+    //     msg.success = true;
+    //
+    //     msg.trailer_dimensions.x = mHistoryBuffer.trailer_dimensions().x();
+    //     msg.trailer_dimensions.y = mHistoryBuffer.trailer_dimensions().y();
+    //     msg.trailer_dimensions.z = mHistoryBuffer.trailer_dimensions().z();
+    //
+    //     msg.trailer_pose.orientation = toQuaternionMsg(mHistoryBuffer.trailer_pose().z());
+    //     msg.trailer_pose.position.x = mHistoryBuffer.trailer_pose().x();
+    //     msg.trailer_pose.position.y = mHistoryBuffer.trailer_pose().y();
+    //     msg.trailer_pose.position.z = 0.0;
+    // }
 
-        msg.trailer_dimensions.x = mHistoryBuffer.trailer_dimensions.x();
-        msg.trailer_dimensions.y = mHistoryBuffer.trailer_dimensions.y();
-        msg.trailer_dimensions.z = mHistoryBuffer.trailer_dimensions.z();
-
-        msg.trailer_pose.orientation = toQuaternionMsg(mHistoryBuffer.trailer_pose.z());
-        msg.trailer_pose.position.x = mHistoryBuffer.trailer_pose.x();
-        msg.trailer_pose.position.y = mHistoryBuffer.trailer_pose.y();
-        msg.trailer_pose.position.z = 0.0;
-    }
+    bool exploreTrailer(const RawCloud::Ptr& cloud);
 
     bool locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::Ptr& trailer_cloud, Eigen::Vector3f& trailer_pose, ROI& trailer_bbox) const;
 
@@ -165,4 +154,33 @@ private:
     bool locateAvailableArea(const RawCloud::Ptr& trailer_cloud, const Eigen::Vector3f& load_size, Eigen::Vector3f& slot_position) const;
 
     void workerLoop();
+
+    visualization_msgs::msg::Marker makeMarker(const std::string_view frame_id, const std::string_view ns, const int id,
+        const Eigen::Vector3d& position, const tf2::Quaternion& orientation, const Eigen::Vector3d& scale, const Eigen::Vector4d& color,
+        const int type = visualization_msgs::msg::Marker::CUBE,
+        const int action = visualization_msgs::msg::Marker::ADD) const
+    {
+        visualization_msgs::msg::Marker msg;
+        msg.header.frame_id = frame_id;
+        msg.header.stamp = this->now();
+        msg.ns = ns;
+        msg.id = id;
+        msg.type = type;
+        msg.action = action;
+
+        msg.pose.position.x = position.x();
+        msg.pose.position.y = position.y();
+        msg.pose.position.z = position.z();
+        msg.pose.orientation = tf2::toMsg(orientation);
+
+        msg.scale.x = scale.x();
+        msg.scale.y = scale.y();
+        msg.scale.z = scale.z();
+
+        msg.color.r = static_cast<float>(color.x());
+        msg.color.g = static_cast<float>(color.y());
+        msg.color.b = static_cast<float>(color.z());
+        msg.color.a = static_cast<float>(color.w());
+        return msg;
+    }
 };

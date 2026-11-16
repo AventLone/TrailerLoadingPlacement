@@ -103,24 +103,13 @@ void FreeSpaceDetect::workerLoop()
         T_1.pretranslate(Eigen::Vector2f(mGoalMsg.pose.position.x, mGoalMsg.pose.position.y));
         T_2.translate(Eigen::Vector2f(-0.5f * 17.0f, 0.0f));
         Eigen::Isometry2f T_3 = T_1 * T_2;
-        visualization_msgs::msg::Marker trailer_roi_marker;
-        trailer_roi_marker.header.frame_id = FRAME_ID;
-        trailer_roi_marker.header.stamp = this->now();
-        trailer_roi_marker.ns = ns;
-        trailer_roi_marker.id = 1;
-        trailer_roi_marker.type = visualization_msgs::msg::Marker::CUBE;
-        trailer_roi_marker.action = visualization_msgs::msg::Marker::ADD;
-        trailer_roi_marker.scale.x = static_cast<double>(trailer_roi.max_x - trailer_roi.min_x);
-        trailer_roi_marker.scale.y = static_cast<double>(trailer_roi.max_y - trailer_roi.min_y);
-        trailer_roi_marker.scale.z = static_cast<double>(trailer_roi.max_z - trailer_roi.min_z);
-        trailer_roi_marker.color.r = 0.8;
-        trailer_roi_marker.color.g = 1.0;
-        trailer_roi_marker.color.b = 0.8;
-        trailer_roi_marker.color.a = 0.2;
-        trailer_roi_marker.pose.orientation = mGoalMsg.pose.orientation;
-        trailer_roi_marker.pose.position.x = T_3.translation()[0];
-        trailer_roi_marker.pose.position.y = T_3.translation()[1];
-        trailer_roi_marker.pose.position.z = 0.5f * (trailer_roi.min_z + trailer_roi.max_z);
+        const Eigen::Vector3d trailer_roi_position(T_3.translation()[0], T_3.translation()[1],
+                                                   0.5f * (trailer_roi.min_z + trailer_roi.max_z));
+        const Eigen::Vector3d trailer_roi_scale(trailer_roi.max_x - trailer_roi.min_x,
+                                                trailer_roi.max_y - trailer_roi.min_y,
+                                                trailer_roi.max_z - trailer_roi.min_z);
+        const Eigen::Vector4d trailer_roi_color(0.8, 1.0, 0.8, 0.2);
+        auto trailer_roi_marker = makeMarker(FRAME_ID, ns, 1, trailer_roi_position, tf_q, trailer_roi_scale, trailer_roi_color);
         visualization_msg.markers.push_back(trailer_roi_marker);
 
         Eigen::Isometry3f goal_pose;
@@ -157,29 +146,15 @@ void FreeSpaceDetect::workerLoop()
                                                         trailer_bbox.max_y - trailer_bbox.min_y,
                                                         trailer_bbox.max_z - trailer_bbox.min_z);
 
-        visualization_msgs::msg::Marker trailer_marker;
-        trailer_marker.header.frame_id = FRAME_ID;
-        trailer_marker.header.stamp = this->now();
-        trailer_marker.ns = ns;
-        trailer_marker.id = 2;
-        trailer_marker.type = visualization_msgs::msg::Marker::CUBE;
-        trailer_marker.action = visualization_msgs::msg::Marker::ADD;
-        trailer_marker.scale.x = trailer_dimensions.x();
-        trailer_marker.scale.y = trailer_dimensions.y();
-        trailer_marker.scale.z = trailer_dimensions.z();
-        trailer_marker.color.r = 0.95f;
-        trailer_marker.color.g = 0.45f;
-        trailer_marker.color.b = 0.1f;
-        trailer_marker.color.a = 0.3f;
-
+        tf2::Quaternion trailer_orientation;
+        trailer_orientation.setRPY(0.0, 0.0, trailer_pose.z());
         const Eigen::Vector3f center_rotated(0.5f * (trailer_bbox.min_x + trailer_bbox.max_x),
                                              0.5f * (trailer_bbox.min_y + trailer_bbox.max_y),
                                              0.5f * (trailer_bbox.min_z + trailer_bbox.max_z));
         const Eigen::Vector2f center_in_frame = Eigen::Rotation2Df(trailer_pose.z()) * center_rotated.head<2>();
-        trailer_marker.pose.position.x = center_in_frame.x();
-        trailer_marker.pose.position.y = center_in_frame.y();
-        trailer_marker.pose.position.z = center_rotated.z();
-        trailer_marker.pose.orientation = toQuaternionMsg(trailer_pose.z());
+        const Eigen::Vector3d trailer_position(center_in_frame.x(), center_in_frame.y(), center_rotated.z());
+        const Eigen::Vector4d trailer_color(0.9, 0.9, 0.9, 0.3);
+        auto trailer_marker = makeMarker(FRAME_ID, ns, 2, trailer_position, trailer_orientation, trailer_dimensions.cast<double>(), trailer_color);
         visualization_msg.markers.push_back(trailer_marker);
 
         const auto rough_ramp_cloud = std::make_shared<RawCloud>();
@@ -199,26 +174,12 @@ void FreeSpaceDetect::workerLoop()
 
             // std::this_thread::sleep_for(std::chrono::milliseconds(100));
             // continue;
-            visualization_msgs::msg::Marker ramp_marker;
-            ramp_marker.header.frame_id = FRAME_ID;
-            ramp_marker.header.stamp = this->now();
-            ramp_marker.ns = ns;
-            ramp_marker.id = 3;
-            ramp_marker.type = visualization_msgs::msg::Marker::CUBE;
-            ramp_marker.action = visualization_msgs::msg::Marker::ADD;
-            ramp_marker.scale.x = ramp_size.x();
-            ramp_marker.scale.y = ramp_size.y();
-            ramp_marker.scale.z = 0.04;
-            ramp_marker.color.r = 0.1f;
-            ramp_marker.color.g = 0.75f;
-            ramp_marker.color.b = 1.0f;
-            ramp_marker.color.a = 0.8f;
-            ramp_marker.pose.position.x = ramp_position.x();
-            ramp_marker.pose.position.y = ramp_position.y();
-            ramp_marker.pose.position.z = ramp_position.z();
             tf2::Quaternion ramp_orientation;
             ramp_orientation.setRPY(0.0, -static_cast<double>(ramp_tilt), 0.0);
-            ramp_marker.pose.orientation = tf2::toMsg(ramp_orientation);
+            const Eigen::Vector3d ramp_marker_position(ramp_position.x(), ramp_position.y(), ramp_position.z());
+            const Eigen::Vector3d ramp_marker_scale(ramp_size.x(), ramp_size.y(), 0.04);
+            const Eigen::Vector4d ramp_marker_color(0.1, 0.75, 1.0, 0.8);
+            auto ramp_marker = makeMarker(FRAME_ID, ns, 3, ramp_marker_position, ramp_orientation, ramp_marker_scale, ramp_marker_color);
             visualization_msg.markers.push_back(ramp_marker);
         }
         else
@@ -241,51 +202,38 @@ void FreeSpaceDetect::workerLoop()
         for (std::size_t index = 0; index < mPlacementZones.size(); ++index)
         {
             constexpr float placement_marker_height = 0.03f;
-            visualization_msgs::msg::Marker placement_marker;
-            placement_marker.header.frame_id = FRAME_ID;
-            placement_marker.header.stamp = this->now();
-            placement_marker.ns = ns;
-            placement_marker.id = static_cast<int>(index) + 10;
-            placement_marker.type = visualization_msgs::msg::Marker::CUBE;
-            placement_marker.action = visualization_msgs::msg::Marker::ADD;
-            placement_marker.scale.x = LOAD_SIZE.x();
-            placement_marker.scale.y = LOAD_SIZE.y();
-            placement_marker.scale.z = placement_marker_height;
+            const Eigen::Vector2f position_in_map = Eigen::Rotation2Df(trailer_pose.z()) * mPlacementZones[index];
+            const Eigen::Vector3d placement_position(position_in_map.x(), position_in_map.y(),
+                                                     trailer_bbox.min_z + 0.2f);
+            const Eigen::Vector3d placement_scale(LOAD_SIZE.x(), LOAD_SIZE.y(), placement_marker_height);
             std::mt19937 color_generator(index);
             std::uniform_real_distribution color_distribution(0.2f, 1.0f);
-            placement_marker.color.r = color_distribution(color_generator);
-            placement_marker.color.g = color_distribution(color_generator);
-            placement_marker.color.b = color_distribution(color_generator);
-            placement_marker.color.a = 0.55f;
-
-            const Eigen::Vector2f position_in_map = Eigen::Rotation2Df(trailer_pose.z()) * mPlacementZones[index];
-            placement_marker.pose.position.x = position_in_map.x();
-            placement_marker.pose.position.y = position_in_map.y();
-            placement_marker.pose.position.z = trailer_bbox.min_z + 0.2f;
-            placement_marker.pose.orientation = toQuaternionMsg(trailer_pose.z());
+            const double red = color_distribution(color_generator);
+            const double green = color_distribution(color_generator);
+            const double blue = color_distribution(color_generator);
+            const Eigen::Vector4d placement_color(red, green, blue, 0.55);
+            auto placement_marker = makeMarker(FRAME_ID, ns, static_cast<int>(index) + 10, placement_position,
+                                               trailer_orientation, placement_scale, placement_color);
             visualization_msg.markers.push_back(placement_marker);
 
-            visualization_msgs::msg::Marker center_marker = placement_marker;
-            center_marker.ns = "placement_centers";
-            center_marker.type = visualization_msgs::msg::Marker::SPHERE;
-            center_marker.scale.x = 0.08;
-            center_marker.scale.y = 0.08;
-            center_marker.scale.z = 0.08;
-            center_marker.color.r = 1.0f;
-            center_marker.color.g = 1.0f;
-            center_marker.color.b = 1.0f;
-            center_marker.color.a = 1.0f;
+            const Eigen::Vector3d center_scale(0.08, 0.08, 0.08);
+            const Eigen::Vector4d center_color(1.0, 1.0, 1.0, 1.0);
+            auto center_marker = makeMarker(FRAME_ID, "placement_centers", static_cast<int>(index) + 10,
+                                            placement_position, trailer_orientation, center_scale, center_color,
+                                            visualization_msgs::msg::Marker::SPHERE);
+            center_marker.header.stamp = placement_marker.header.stamp;
             visualization_msg.markers.push_back(center_marker);
 
-            visualization_msgs::msg::Marker label_marker = center_marker;
-            label_marker.ns = "placement_labels";
-            label_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+            Eigen::Vector3d label_position = placement_position;
+            label_position.z() += 0.15;
+            tf2::Quaternion label_orientation;
+            label_orientation.setRPY(0.0, 0.0, 0.0);
+            const Eigen::Vector3d label_scale(0.0, 0.0, 0.3);
+            auto label_marker = makeMarker(FRAME_ID, "placement_labels", static_cast<int>(index) + 10,
+                                           label_position, label_orientation, label_scale, center_color,
+                                           visualization_msgs::msg::Marker::TEXT_VIEW_FACING);
+            label_marker.header.stamp = placement_marker.header.stamp;
             label_marker.text = std::to_string(index + 1);
-            label_marker.scale.x = 0.0;
-            label_marker.scale.y = 0.0;
-            label_marker.scale.z = 0.3;
-            label_marker.pose.position.z += 0.15;
-            label_marker.pose.orientation = toQuaternionMsg(0.0);
             visualization_msg.markers.push_back(label_marker);
         }
 
@@ -299,20 +247,11 @@ void FreeSpaceDetect::workerLoop()
         if (Eigen::Vector3f slot_position; locateAvailableArea(refined_trailer_cloud, LOAD_SIZE, slot_position))
         {
             const Eigen::Vector2f position_in_map = Eigen::Rotation2Df(trailer_pose.z()) * slot_position.head<2>();
-            available_marker.action = visualization_msgs::msg::Marker::ADD;
-            available_marker.scale.x = LOAD_SIZE.x();
-            available_marker.scale.y = LOAD_SIZE.y();
-            available_marker.scale.z = LOAD_SIZE.z();
-            available_marker.color.r = 0.0f;
-            available_marker.color.g = 1.0f;
-            available_marker.color.b = 0.0f;
-            available_marker.color.a = 0.6f;
-            available_marker.pose.position.x = position_in_map.x();
-            available_marker.pose.position.y = position_in_map.y();
-            available_marker.pose.position.z = trailer_bbox.min_z + 0.5f * LOAD_SIZE.z();
-            available_marker.pose.orientation = toQuaternionMsg(trailer_pose.z());
+            const Eigen::Vector3d available_position(position_in_map.x(), position_in_map.y(), trailer_bbox.min_z + 0.5f * LOAD_SIZE.z());
+            const Eigen::Vector4d available_color(0.0, 1.0, 0.0, 0.6);
+            available_marker = makeMarker(FRAME_ID, "available_area", 0, available_position, trailer_orientation,
+                                          LOAD_SIZE.cast<double>(), available_color);
 
-            assignValue(perception_result);
             perception_result.slot_position.x = slot_position.x();
             perception_result.slot_position.y = slot_position.y();
             perception_result.slot_position.z = slot_position.z();
@@ -325,6 +264,11 @@ void FreeSpaceDetect::workerLoop()
 
         publish_rate.sleep();
     }
+}
+
+bool FreeSpaceDetect::exploreTrailer(const RawCloud::Ptr& cloud)
+{
+
 }
 
 bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::Ptr& trailer_cloud, Eigen::Vector3f& trailer_pose, ROI& trailer_bbox) const
@@ -481,6 +425,7 @@ bool FreeSpaceDetect::locateTrailer(const RawCloud::Ptr& cloud, const RawCloud::
                 second_support += std::abs(second_row - boundary[first_is_upper ? 2 : 1]) <= boundary_tolerance;
                 outside_bins += boundary[1] < upper_row - boundary_tolerance || boundary[2] > lower_row + boundary_tolerance;
             }
+
             if (sampled_bins < 3 || first_support < 2 || second_support < 2 || outside_bins > std::max(1, sampled_bins / 5))
             {
                 continue;
@@ -807,6 +752,110 @@ bool FreeSpaceDetect::planPlacementZone(const Eigen::Vector3f& trailer_pose, con
     return true;
 }
 
+static bool isSweepCollisionFree(const RawCloud& cloud, const Eigen::Vector3f& from, const Eigen::Vector3f& to,
+                                 const Eigen::Vector3f& load_size, const float clearance)
+{
+    const float half_x = 0.5f * load_size.x() + clearance;
+    const float half_y = 0.5f * load_size.y() + clearance;
+
+    const float min_x = std::min(from.x(), to.x()) - half_x;
+    const float max_x = std::max(from.x(), to.x()) + half_x;
+    const float min_y = std::min(from.y(), to.y()) - half_y;
+    const float max_y = std::max(from.y(), to.y()) + half_y;
+
+    const float min_z = std::min(from.z(), to.z()) - clearance;
+    const float max_z = std::max(from.z(), to.z()) + load_size.z() + clearance;
+
+    return !std::ranges::any_of(cloud, [&](const auto& point)
+    {
+        return pcl::isFinite(point) && point.x >= min_x && point.x <= max_x &&
+               point.y >= min_y && point.y <= max_y &&
+               point.z >= min_z && point.z <= max_z;
+    });
+}
+
+static bool pushToTopLeft(const RawCloud& obstacle_cloud, const Eigen::Vector3f& load_size, Eigen::Vector3f& position,
+                          const float min_center_x, const float min_center_y)
+{
+    constexpr float clearance = 0.0f;
+    constexpr float initial_step = 0.02f;
+    constexpr std::size_t max_iterations = 20000;
+
+    if (!isSweepCollisionFree(obstacle_cloud, position, position, load_size, clearance))
+    {
+        return false;
+    }
+
+    float step = initial_step;
+    bool x_first = true;
+
+    const auto try_move = [&](const int axis, const float delta) -> bool
+    {
+        Eigen::Vector3f candidate = position;
+        candidate[axis] += delta;
+
+        // Keep the box inside the search boundary.
+        if (axis == 0 && candidate.x() < min_center_x)
+        {
+            return false;
+        }
+
+        if (axis == 1 && candidate.y() < min_center_y)
+        {
+            return false;
+        }
+
+        if (!isSweepCollisionFree(obstacle_cloud, position, candidate,
+                                  load_size, clearance))
+        {
+            return false;
+        }
+
+        position = candidate;
+        return true;
+    };
+
+    for (std::size_t iteration = 0; iteration < max_iterations; ++iteration)
+    {
+        constexpr float min_step = 0.001f;
+        bool moved_x = false;
+        bool moved_y = false;
+
+        // Alternate the movement priority.
+        if (x_first)
+        {
+            moved_x = try_move(0, -step);
+            moved_y = try_move(1, -step);
+        }
+        else
+        {
+            moved_y = try_move(1, -step);
+            moved_x = try_move(0, -step);
+        }
+
+        x_first = !x_first;
+
+        // At least one direction can still move.
+        if (moved_x || moved_y)
+        {
+            continue;
+        }
+
+        // Both directions are blocked.
+        if (step <= min_step)
+        {
+
+
+            return true;
+        }
+
+        // Reduce the step size and retry both directions.
+        step = std::max(step * 0.5f, min_step);
+    }
+
+    return false;
+}
+
 bool FreeSpaceDetect::locateAvailableArea(const RawCloud::Ptr& trailer_cloud, const Eigen::Vector3f& load_size, Eigen::Vector3f& slot_position) const
 {
     if (!trailer_cloud || trailer_cloud->size() < 100 || !load_size.allFinite() || (load_size.array() <= 0.0f).any())
@@ -875,8 +924,8 @@ bool FreeSpaceDetect::locateAvailableArea(const RawCloud::Ptr& trailer_cloud, co
     cv::circle(debug_img, *slot_position_img, 2, cv::Scalar(0, 0, 255), cv::FILLED, cv::LINE_AA);
     publishDebugImg(debug_img);
 
-    constexpr uint32_t points_tolerance = 20;
-    if (filter3d::checkSpace(*cloud_without_floor, slot_position, load_size) < points_tolerance)
+    if (constexpr uint32_t points_tolerance = 20;
+        filter3d::checkSpace(*cloud_without_floor, slot_position, load_size) < points_tolerance)
     {
         return true;
     }
@@ -884,122 +933,19 @@ bool FreeSpaceDetect::locateAvailableArea(const RawCloud::Ptr& trailer_cloud, co
     const auto slot_cloud = std::make_shared<RawCloud>();
     constexpr float dilate_size = 0.1f;
     ROI slot_roi = {.min_x = -0.5f * load_size.x() - dilate_size, .max_x = 0.5f * load_size.x() + dilate_size,
-        .min_y = -0.5f * load_size.y() - dilate_size, .max_y = 0.5f * load_size.y() + dilate_size, .min_z = 0.0,
-        .max_z = load_size.z()};
+                    .min_y = -0.5f * load_size.y() - dilate_size, .max_y = 0.5f * load_size.y() + dilate_size, .min_z = 0.0,
+                    .max_z = load_size.z()};
     filter3d::getCloud(*cloud_without_floor, slot_cloud, nullptr, slot_roi, slot_position);
 
-    constexpr std::size_t min_plane_points = 10;
-    constexpr float plane_distance_threshold = 0.03f;
-    constexpr double angle_tolerance = 5.0 * CV_PI / 180.0;
-    if (slot_cloud->size() < 2 * min_plane_points)
-    {
-        RCLCPP_WARN(get_logger(), "Too few points to fit two slot boundary planes!");
-        return false;
-    }
-
-    pcl::SACSegmentation<pcl::PointXYZ> seg;
-    seg.setOptimizeCoefficients(true);
-    seg.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
-    seg.setMethodType(pcl::SAC_RANSAC);
-    seg.setMaxIterations(300);
-    seg.setDistanceThreshold(plane_distance_threshold);
-    seg.setEpsAngle(angle_tolerance);
-    seg.setInputCloud(slot_cloud);
-
-    std::vector<RawCloud::Ptr> plane_clouds(2);
-    std::vector<Eigen::Vector3f> plane_lines(2);
-    const float center_z = slot_position.z() + 0.5f * load_size.z();
-    for (int plane_index = 0; plane_index < 2; ++plane_index)
-    {
-        const int normal_axis = 1 - plane_index;
-        seg.setAxis(Eigen::Vector3f::Unit(normal_axis));
-        pcl::PointIndices inliers;
-        pcl::ModelCoefficients coefficients;
-        seg.segment(inliers, coefficients);
-        if (inliers.indices.size() < min_plane_points || coefficients.values.size() != 4)
-        {
-            RCLCPP_WARN(get_logger(), "Failed to fit a slot plane perpendicular to axis %d!", normal_axis);
-            return false;
-        }
-
-        const Eigen::Vector4f plane(coefficients.values[0], coefficients.values[1], coefficients.values[2], coefficients.values[3]);
-        if (const float normal_length = plane.head<3>().norm();
-            !plane.allFinite() || normal_length < 1.0e-6f || std::abs(plane[normal_axis]) / normal_length < std::cos(angle_tolerance))
-        {
-            return false;
-        }
-        plane_lines[plane_index] = Eigen::Vector3f(plane.x(), plane.y(), plane.z() * center_z + plane.w());
-        plane_clouds[plane_index] = std::make_shared<RawCloud>();
-        plane_clouds[plane_index]->reserve(inliers.indices.size());
-        for (const int index : inliers.indices)
-        {
-            plane_clouds[plane_index]->push_back((*slot_cloud)[index]);
-        }
-    }
-
-    Eigen::Vector2f corner;
-    if (!feature3d::intersectionPoint(plane_lines[0], plane_lines[1], corner) || !corner.allFinite())
+    if (Eigen::Vector3f refined_slot_position = slot_position + Eigen::Vector3f(0.5f * load_size.x(), 0.5f * load_size.y(), 0.0f);
+        !pushToTopLeft(*slot_cloud, load_size, refined_slot_position, slot_position.x(), slot_position.y()))
     {
         return false;
     }
-
-    Eigen::Vector2f fitted_center = slot_position.head<2>();
-    for (int plane_index = 0; plane_index < 2; ++plane_index)
+    else
     {
-        constexpr float slot_clearance = 0.03f;
-        const int tangent_axis = plane_index;
-        pcl::PointXYZ min_point, max_point;
-        pcl::getMinMax3D(*plane_clouds[plane_index], min_point, max_point);
-        const float min_coordinate = min_point.getVector3fMap()[tangent_axis];
-        const float max_coordinate = max_point.getVector3fMap()[tangent_axis];
-        const float span = max_coordinate - min_coordinate;
-        if (span <= 2.0f * plane_distance_threshold)
-        {
-            return false;
-        }
-        const bool trim_low = std::abs(corner[tangent_axis] - min_coordinate) <= std::abs(corner[tangent_axis] - max_coordinate);
-        const float cutoff = trim_low ? min_coordinate + span / 3.0f : max_coordinate - span / 3.0f;
-        const auto trimmed_cloud = std::make_shared<RawCloud>();
-        trimmed_cloud->reserve(plane_clouds[plane_index]->size());
-        for (const auto& point : *plane_clouds[plane_index])
-        {
-            if (const float coordinate = point.getVector3fMap()[tangent_axis]; trim_low ? coordinate >= cutoff : coordinate <= cutoff)
-            {
-                trimmed_cloud->push_back(point);
-            }
-        }
-        plane_clouds[plane_index] = trimmed_cloud;
-        if (trimmed_cloud->size() < min_plane_points)
-        {
-            RCLCPP_WARN(get_logger(), "Insufficient valid plane points after trimming the slot corner!");
-            return false;
-        }
-
-        pcl::getMinMax3D(*trimmed_cloud, min_point, max_point);
-        const int normal_axis = 1 - plane_index;
-        const float min_boundary = min_point.getVector3fMap()[normal_axis];
-        const float max_boundary = max_point.getVector3fMap()[normal_axis];
-        const float direction = slot_position[normal_axis] - 0.5f * (min_boundary + max_boundary);
-        if (std::abs(direction) < 1.0e-6f)
-        {
-            return false;
-        }
-        const float offset = 0.5f * load_size[normal_axis] + slot_clearance;
-        fitted_center[normal_axis] = direction > 0.0f ? max_boundary + offset : min_boundary - offset;
+        slot_position = refined_slot_position;
     }
-
-    if (!fitted_center.allFinite())
-    {
-        return false;
-    }
-    const Eigen::Vector3f fitted_position(fitted_center.x(), fitted_center.y(), slot_position.z());
-    if (const auto points_in_space = filter3d::checkSpace(*cloud_without_floor, fitted_position, load_size);
-        points_in_space > points_tolerance)
-    {
-        RCLCPP_WARN(get_logger(), "points_in_space: %d. The adjusted slot still intersects an obstacle!", points_in_space);
-        // return false;
-    }
-    slot_position = fitted_position;
 
     return true;
 }

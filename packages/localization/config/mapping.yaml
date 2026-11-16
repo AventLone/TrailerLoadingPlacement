@@ -1,0 +1,13 @@
+mapping:
+    ros__parameters:
+        Topics:
+            LidarScan: "/sim_scan"
+            RegisteredScan: "/rigistered_scan"
+            CloudMap: "/cloud_map"
+            BasePose: "/base_pose"
+            PosePath: "/base_pose_path"
+
+        MapSavingPath: "/home/avent/Desktop/TrailerLoadingPlacement/packages/localization/map"
+
+        intensity_threshold: -1.0
+        IntensityKeepRatio: 0.99

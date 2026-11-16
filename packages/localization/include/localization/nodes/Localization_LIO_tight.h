@@ -12,8 +12,8 @@
 #include <tf2_ros/transform_broadcaster.hpp>
 #include <pcl/common/transforms.h>
 #include <pcl/filters/voxel_grid.h>
-#include "localization/LIO/IESKF.h"
-#include "localization/LIO/ImuProcessor.h"
+#include "localization/locator/IESKF.h"
+#include "localization/locator/ImuProcessor.h"
 
 class Localization_LIO_T : public rclcpp::Node
 {

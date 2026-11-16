@@ -20,6 +20,7 @@ class Localization_LO : public rclcpp::Node
 {
     static constexpr bool PRINT_BENCHMARK = false;
     static constexpr float MAP_RESOLUTION = SparseVoxel::MIN_DIST;
+
 public:
     explicit Localization_LO(const std::string& node_name) : Node(node_name), mTfBuffer(this->get_clock()), mTfListener(mTfBuffer),
         mTfBroadcaster(std::make_unique<tf2_ros::TransformBroadcaster>(*this))

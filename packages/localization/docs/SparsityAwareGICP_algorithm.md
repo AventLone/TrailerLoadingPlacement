@@ -179,39 +179,27 @@ add new voxel keys to voxel_map and occupied_voxels
 
 ## 5 协方差估计：`estimateCovariances()`
 
-协方差估计完全在 CPU 中执行。函数首先从本次 `VoxelPointLayout` 构建临时映射：
-
-```text
-VoxelKey -> layout.voxels index
-```
-
-然后逐点处理。
+当前 `GICP` 使用 `SparseVoxel::estimateCovariances()` 在 CPU 上并行估计协方差。
+初次插入和增量插入都使用同一策略；增量插入会重新估计受影响体素及相邻体素中的点。
+并行任务以体素为单位：每个受影响体素只查找一次相邻体素，随后让其中各点共享候选体素列表。
+列表只在本次更新中使用，避免增量插入后持久缓存失效；各点仍独立选取最近邻和估计协方差。
 
 ### 5.1 邻域搜索
 
-对点所在体素 $(i, j, k)$，枚举每轴半径为 `covariance_voxel_radius` 的立方邻域：
+对点所在体素 $(i, j, k)$，枚举相邻一层的 27 个体素：
 
 $$
-dx, dy, dz \in [-r, r]
+dx, dy, dz \in [-1, 1]
 $$
 
-最多查询 $(2r + 1)^3$ 个体素。候选点包含当前点本身。候选数量超过
+候选包含当前点本身，通过最大堆保留局部最近的最多 12 个点。
+这仍是固定体素窗口内的局部 kNN，不是全局 kNN。
+邻居不足 8 个时，保持 `covariance = I` 和 `covariance_valid = false`，沿用原有回退行为。
+候选体素按当前体素、面邻居、边邻居、角邻居的顺序访问。
+堆填满后，使用当前最远邻居距离作为搜索半径；若查询点到某候选体素包围盒的距离下界
+已经超过该半径，则跳过整个体素的点扫描。浮点比较留有保守裕量，避免边界误剪枝。
 
-```text
-max(3, min_covariance_neighbors, max_covariance_neighbors)
-```
-
-时，使用 `std::ranges::nth_element` 保留欧氏距离平方最小的一批候选点。该批候选不额外排序，因为后续均值和协方差计算不依赖顺序。
-
-有效协方差所需邻居数为：
-
-```text
-max(3, min_covariance_neighbors)
-```
-
-CPU 实现不包含固定的协方差邻居容量上限。
-
-### 5.2 样本协方差与归一化
+### 5.2 PCL 式协方差谱归一化
 
 对于 $N$ 个候选邻居，先计算均值：
 
@@ -219,37 +207,51 @@ $$
 \mu = \frac{1}{N}\sum_i p_i
 $$
 
-再计算带对角线正则的样本协方差：
+再计算局部样本协方差：
 
 $$
-\Sigma = \frac{1}{N - 1}\sum_i(p_i - \mu)(p_i - \mu)^T + \lambda I
+\Sigma_{\mathrm{raw}} = \frac{1}{N - 1}\sum_i(p_i - \mu)(p_i - \mu)^T
 $$
 
-其中：
-
-```text
-lambda = max(1e-6, covariance_regularization)
-```
-
-若行列式非有限或绝对值不大于 $10^{-12}$，该点协方差无效。接着计算 `covariance.inverse().norm()`；若该值无效或不为正，协方差同样无效。有效协方差最终按逆矩阵范数归一化：
+对其做 SVD，按奇异值从大到小保留主轴方向 $U$，将方差重设为 PCL GICP 默认的
+`(1, 1, 0.001)`：
 
 $$
-\Sigma \leftarrow \Sigma \cdot \|\Sigma^{-1}\|
+\Sigma_{\mathrm{GICP}} =
+U\,\mathrm{diag}(1,1,10^{-3})\,U^T
 $$
 
-并设 `covariance_valid = true`。
+这表示切向弱约束、法向强约束，不是简单添加对角线正则，也不按逆矩阵范数缩放。
+有效结果设 `covariance_valid = true`。原始平面协方差即使奇异，重构结果仍正定。
+SVD 失败会输出 PCL 错误日志，并保留该点无效单位阵的现有回退，不会将其标记为有效。
+
+此矩阵是 GICP 的几何权重模型，不应作为物理测量噪声协方差。
+源点和目标点都使用相同归一化；体素稀疏化、邻域范围、最少邻居数及位姿优化器保持不变。
+当前使用最少 8、最多 12 个邻居及 0.5 m 体素，存储和 SVD 使用 `float`；
+PCL 的协方差计算使用 `double`，因此并非逐位一致。
+FAR-LIO 公式已单独实验并恢复为本策略，见第 15 节。
 
 
 
-## 6 对应搜索：`findCorrespondences()`
+## 6 对应搜索：`SparseVoxel::nearestNeighbor()`
 
 每次迭代对每个源点执行：
 
-1. 用当前 `Sophus::SE3f source_to_target` 将源点变换到目标坐标系；
+1. 用当前 `Sophus::SE3d source_to_target` 将源点变换到目标坐标系；
 2. 找到该位置所在体素；
-3. 枚举该体素及其每轴相邻一层体素，即固定的 $3^3 = 27$ 个 key；
-4. 通过 `TargetCache::voxel_map` 查找每个存在的目标体素；
-5. 在这些体素的连续点区间中选择距离平方最小的目标点。
+3. 先搜索当前体素，尽早收紧最近距离；
+4. 枚举其余相邻一层体素，用包围盒距离下界剪枝后再查询哈希表；
+5. 在保留体素中选择距离平方最小的目标点。等距时仍按原来的体素字典序和体素内插入顺序选择。
+
+对包围盒 $[b_{\min}, b_{\max}]$，距离下界为：
+
+$$
+d_{\mathrm{box}}^2(q) =
+\sum_{a\in\{x,y,z\}}\max(b_{\min,a}-q_a,0,q_a-b_{\max,a})^2
+$$
+
+只有下界严格超过当前半径并计入浮点裕量后才剪枝。
+查询窗口仍是固定的 27 个体素，剪枝不把该接口变为全局最近邻搜索。
 
 仅当距离平方严格小于
 
@@ -257,7 +259,7 @@ $$
 \text{max\_correspondence\_distance}^2
 $$
 
-时才建立对应。未找到对应时 `target_index = -1`。
+时才建立对应。未找到对应时返回的 `Neighbor::point = nullptr`。
 
 `max_correspondence_distance` 只影响欧氏距离阈值；它不会扩大固定为一层相邻体素的查询范围。
 
@@ -495,3 +497,105 @@ result.fitness_score <= config.max_fitness_score
 - 大面积平面或平行结构仍可能导致某些自由度约束不足；更可靠的初始位姿或运动先验能降低局部最优和错误对应风险。
 
 轮速或其他里程计最直接的融合方式是提供更好的 `initial_guess`。若需将先验直接加入优化，则应在 CPU 端构建完 $H$、$g$ 后加入相应的先验项，再复用同一个 $6 \times 6$ `LDLT` 求解流程。
+
+## 13 当前 GICP 与 PCL 的可复现对比
+
+[`tests/gicp_benchmark.cpp`](../tests/gicp_benchmark.cpp) 直接编译当前
+[`GICP`](../include/localization/GICP/GICP.h)、
+[`SparseVoxel`](../include/localization/types/SparseVoxel.h) 和安装的 PCL GICP，
+不修改任何配准算法。启用 `BUILD_TESTING` 后，在工作区根目录运行：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cmake -S packages/localization -B build/localization -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build/localization --target gicp_benchmark -j2
+ctest --test-dir build/localization -R '^gicp_benchmark_smoke$' --output-on-failure
+build/localization/gicp_benchmark --repeats 5 --threads 8 --csv /tmp/gicp_benchmark.csv
+```
+
+测试使用独立采样的合成多曲面点云，包含平面、起伏面和变半径圆柱面，不是把同一批点简单变换后配准。
+源到目标的真实位姿固定为平移 `(0.18, -0.08, 0.04) m` 和 Z/Y/X 欧拉角
+`(3, -1.5, 1) deg`，初值统一为单位变换。测试覆盖 3k/12k/40k 点、
+0/5/20 mm 每轴高斯噪声和 100%/70%/40% 源点重叠率。
+部分重叠由沿 X 轴裁剪观测范围构造；重叠掩码取自无噪声几何，而非算法返回的对应点。
+每组先预热一次，再使用相同的一组固定种子重复测试；两种算法的执行顺序轮换。
+
+对比包含两种输入：
+
+- `raw`：相同原始点云，保留自写 GICP 内部稀疏化、PCL 使用全部输入点的实际 API 行为。
+- `matched_sparse`：先通过当前 `SparseVoxel` 提取相同稀疏点集，再分别传给两个算法；
+  程序检查自写 GICP 没有再次减少点数。共享采样不计时，因此该模式仅用于分离采样数量的影响，
+  不代表从原始点云开始的端到端耗时。
+
+自写版本分别使用 TBB 1 线程和 `--threads` 指定的线程预算；PCL 1.14 的该实现为串行。
+两者最大对应距离均为 0.5 m、最多 100 次外层迭代，停止阈值数值均为 `1e-4`；
+两者阈值定义不同，不能认为停止条件完全等价。
+PCL 使用默认 Newton 优化器，协方差邻居数从 `SparseVoxel::MAX_COVARIANCE_NEIGHBORS`
+读取，当前为 12（PCL 默认值为 20）。两者都使用 `(1, 1, 0.001)` 谱归一化，
+但局部邻域、数值精度和优化器仍不同。
+
+计时分为 `target_ms`（目标索引和协方差构建）与 `align_ms`（源点预处理和配准），
+`total_ms` 为两者之和。PCL 的目标 KD-tree 和协方差通过其自身实现预先构建；
+冒烟测试校验这与普通 `align()` 得到相同变换。每次测试重新构建目标，避免缓存状态混淆计时。
+冒烟测试还校验平面和带噪声邻域的协方差与 PCL 一致、固定特征值和正定性，
+以及邻居不足时的回退和增量插入后的重新估计。
+PCL 的输出点云生成计入 `align_ms`，自写 API 只输出位姿。
+数据生成、共享采样和误差评估不计时。
+
+CSV 逐次保存输入/实际点数、迭代次数、耗时、返回的收敛标志和统一精度指标：
+
+- `translation_mm`、`rotation_deg`：最终位姿相对已知真值的误差。
+- `reference_rmse_mm`：在原始源点的真实重叠区域，最终变换点到其无噪声生成位置的 RMSE。
+- `nn_rmse_mm`：同一区域内，变换后的原始源点到原始目标点云的最近邻 RMSE。
+- `oracle_rmse_mm`：使用真实变换时的源点 RMSE，作为输入噪声参考。
+- `success`：平移误差小于 20 mm **且**旋转误差小于 0.2 deg，不依赖算法自己的 `converged`。
+
+不要直接比较两者各自的 `fitness_score`：对应集合、采样数量和评估位姿可能不同。
+合成测试不能代替真实雷达点云、运动畸变和实际初值分布下的评估。
+
+## 14 搜索正确性与微基准
+
+[`tests/sparse_voxel_search.cpp`](../tests/sparse_voxel_search.cpp) 将搜索结果与同一 27 体素范围内
+的暴力搜索比较，覆盖负坐标、体素面及其相邻浮点值、距离门限、等距点、空地图、
+不同 k、增量插入、清空重建和较大坐标，并在 1/8 线程下检查共享邻域协方差的一致性。
+1-NN 保留原有等距优先级；kNN 保证最近距离集合不变，边界等距点的具体集合没有唯一性约定。
+
+```bash
+cmake --build build/localization --target sparse_voxel_search gicp_benchmark -j2
+ctest --test-dir build/localization -R '^(sparse_voxel_search|gicp_benchmark_smoke)$' --output-on-failure
+build/localization/sparse_voxel_search --benchmark
+```
+
+微基准固定单线程，使用相同保留点集及体素分组查询顺序，对各组预热一次后取 7 轮中位数。
+`insert_ms` 包括稀疏索引和协方差构建；`*_us` 只包含单次搜索，不含索引构建。
+PCL 的结果缓冲区在查询间复用。对比前后应保持相同 k、输入和编译选项；
+局部体素 kNN 与 PCL 全局 kNN 的搜索定义仍不同，正确性以局部暴力搜索对照为准。
+
+## 15 FAR-LIO 协方差公式实验
+
+2026-10-29 对 FAR-LIO 论文式 (1) 做了单因素实验：
+
+$$
+C=\Sigma_{\mathrm{raw}}+10^{-3}I,\qquad
+\Sigma_{\mathrm{FAR}}=
+\left(\frac{C^{-1}}{\|C^{-1}\|_F}\right)^{-1}
+=C\,\|C^{-1}\|_F
+$$
+
+实验用带检查的 `LDLT` 求解精度矩阵，不需要 SVD 或第二次求逆。
+正定性、单位精度 Frobenius 范数、独立双精度公式和增量更新测试均通过。
+只替换协方差公式，保持当前 8/12 邻居参数、体素搜索、采样、优化器和初值不变。
+每场景使用相同的 10 个种子；所有点数与 PCL 对照结果不变。
+
+原始输入模式下，平移误差中位数（mm）为：
+
+| 场景 | PCL 式协方差 | FAR-LIO 公式 | 成功次数变化 |
+|---|---:|---:|---:|
+| 12k 点、5 mm 噪声 | 0.939 | 2.247 | 10/10 → 10/10 |
+| 70% 重叠 | 3.396 | 142.188 | 10/10 → 0/10 |
+| 40% 重叠 | 5.723 | 273.974 | 10/10 → 0/10 |
+
+成功标准为平移误差小于 20 mm 且旋转误差小于 0.2 deg。
+此次仅移植公式，没有复现论文的 k=10、4 m 体素、自适应门限和 Cauchy 鲁棒核，
+不能据此判断完整 FAR-LIO 系统的优劣。发现本地部分重叠场景退化后，按用户选择恢复 PCL 策略；
+FAR-LIO 公式不作为当前默认实现，实验补丁与逐次数据单独保留。

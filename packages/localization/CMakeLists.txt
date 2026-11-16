@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(localization LANGUAGES C CXX)
+project(mapping_localization LANGUAGES C CXX)
 
 if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
@@ -19,40 +19,36 @@ endif ()
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies() # Automaticly find all the packages mentioned in 'package.xml'
 
-file(GLOB_RECURSE SOURCE_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/source/*.cpp)
+set(COMMON_SOURCE_FILES
+    source/GICP/GICP.cpp
+    source/types/SparseVoxel.cpp
+)
 
 find_package(Sophus REQUIRED)
 find_package(TBB REQUIRED)
 
-ament_auto_add_executable(localization ${SOURCE_FILES})
-target_include_directories(localization PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+ament_auto_add_executable(localization
+    source/localization.cpp
+    source/nodes/Localization.cpp
+    ${COMMON_SOURCE_FILES}
 )
-target_link_libraries(localization Sophus::Sophus TBB::tbb)
-target_compile_features(localization PUBLIC c_std_99 cxx_std_23)
+
+ament_auto_add_executable(mapping
+    source/mapping.cpp
+    source/nodes/Mapping.cpp
+    ${COMMON_SOURCE_FILES}
+)
+
+foreach (target localization mapping)
+    target_include_directories(${target} PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+    )
+    target_link_libraries(${target} Sophus::Sophus TBB::tbb)
+    target_compile_features(${target} PUBLIC c_std_99 cxx_std_23)
+endforeach ()
 
 if (BUILD_TESTING)
-    add_executable(ieskf_regression
-        tests/ieskf_regression.cpp
-        source/LIO/IESKF.cpp
-        source/types/iVox.cpp
-    )
-    ament_target_dependencies(ieskf_regression SYSTEM ${${PROJECT_NAME}_FOUND_BUILD_DEPENDS})
-    target_include_directories(ieskf_regression PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(ieskf_regression Sophus::Sophus TBB::tbb)
-    target_compile_features(ieskf_regression PRIVATE cxx_std_23)
-    add_test(NAME ieskf_regression COMMAND ieskf_regression)
-
-#    add_executable(incremental_voxel_test
-#        test/incremental_voxel_test.cpp
-#        source/LIO/SparseVoxel.cpp
-#    )
-#    target_include_directories(incremental_voxel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-#    ament_target_dependencies(incremental_voxel_test pcl_ros)
-#    target_compile_features(incremental_voxel_test PRIVATE cxx_std_23)
-#    add_test(NAME incremental_voxel_test COMMAND incremental_voxel_test)
-
     find_package(ament_lint_auto REQUIRED)
     set(ament_cmake_copyright_FOUND TRUE)
     set(ament_cmake_cpplint_FOUND TRUE)
@@ -62,4 +58,4 @@ endif ()
 # --------------------------------------------------------------------------------
 # Install
 # --------------------------------------------------------------------------------
-ament_auto_package(INSTALL_TO_SHARE)
+ament_auto_package(INSTALL_TO_SHARE config)
